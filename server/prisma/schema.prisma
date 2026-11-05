@@ -1,0 +1,110 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+// Роли пользователей
+enum Role {
+  DEALER
+  ADMIN
+}
+
+// Уровни дилера для расчета персональной оптовой скидки
+enum DealerTier {
+  BRONZE // например, базовая скидка 5%
+  SILVER // скидка 10%
+  GOLD   // скидка 15%
+}
+
+// Тип заявки: со склада или предзаказ под поставку
+enum OrderType {
+  IN_STOCK
+  PREORDER
+}
+
+// Статусы заказа / предзаказа
+enum OrderStatus {
+  PENDING       // На проверке у менеджера
+  APPROVED      // Согласован (выставлен счет)
+  IN_PRODUCTION // В производстве / В пути с завода
+  READY         // Прибыл на склад, готов к отгрузке
+  COMPLETED     // Отгружен дилеру
+  CANCELLED     // Отменен
+}
+
+model User {
+  id            Int        @id @default(autoincrement())
+  email        String     @unique
+  passwordHash String
+  role         Role       @default(DEALER)
+  
+  // Данные юрлица для B2B кабинета
+  companyName  String
+  inn          String     @unique
+  phone        String
+  
+  dealerTier   DealerTier @default(BRONZE)
+  isVerified   Boolean    @default(false) // Админ подтверждает дилера перед открытием оптовых цен
+  
+  orders       Order[]
+  createdAt    DateTime   @default(now())
+}
+
+model Category {
+  id       Int       @id @default(autoincrement())
+  name     String
+  slug     String    @unique
+  products Product[]
+}
+
+model Product {
+  id           Int         @id @default(autoincrement())
+  sku          String      @unique // Артикул оборудования
+  title        String
+  description  String
+  basePrice    Float       // Базовая оптовая цена
+  minOrderQty  Int         @default(1) // Минимальная партия (MOQ)
+  stockQty     Int         @default(0) // Остаток на складе (если 0 — только предзаказ)
+  leadTimeDays Int         @default(14) // Срок поставки по предзаказу (в днях)
+  imageUrl     String?
+  specPdfUrl   String?     // PDF со спецификацией оборудования
+  specs        Json?       // Характеристики (мощность, габариты, вес)
+  
+  categoryId   Int
+  category     Category    @relation(fields: [categoryId], references: [id])
+  orderItems   OrderItem[]
+  createdAt    DateTime    @default(now())
+}
+
+model Order {
+  id                    Int         @id @default(autoincrement())
+  userId                Int
+  user                  User        @relation(fields: [userId], references: [id])
+  
+  orderType             OrderType   @default(IN_STOCK)
+  status                OrderStatus @default(PENDING)
+  totalAmount           Float
+  estimatedDeliveryDate DateTime?   // Ориентировочная дата поставки для предзаказов
+  comment               String?
+  invoiceUrl            String?     // Ссылка на счет для дилера
+  
+  items                 OrderItem[]
+  createdAt             DateTime    @default(now())
+  updatedAt             DateTime    @updatedAt
+}
+
+model OrderItem {
+  id           Int     @id @default(autoincrement())
+  orderId      Int
+  order        Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  productId    Int
+  product      Product @relation(fields: [productId], references: [id])
+  
+  quantity     Int
+  priceAtOrder Float   // Зафиксированная цена со скидкой дилера на момент оформления
+}
